@@ -90,15 +90,15 @@ def _detect_report_date(df: pd.DataFrame) -> tuple[str, list[str]]:
             dates.extend(pd.to_datetime(df[col], errors="coerce").dropna().dt.date.tolist())
     if not dates:
         # Fallback: today (shouldn't happen with real reports)
-        warnings.append("Nuk u gjet asnjë datë në raport — u përdor data e sotme.")
+        warnings.append("No dates found in report — used today's date as fallback.")
         return (datetime.now().strftime("%Y-%m-%d"), warnings)
     counter = Counter(dates)
     most_common, count = counter.most_common(1)[0]
     if len(counter) > 1:
         others = ", ".join(str(d) for d, _ in counter.most_common()[1:5])
         warnings.append(
-            f"Raporti përmban data të ndryshme. U përdor {most_common} ({count} rreshta). "
-            f"Datat e tjera: {others}."
+            f"Report contains multiple dates. Used {most_common} ({count} rows). "
+            f"Other dates: {others}."
         )
     return (most_common.strftime("%Y-%m-%d"), warnings)
 
@@ -133,10 +133,18 @@ def _build_rows_for_output(
     collapse_casino = output_cfg["key"] in config.COLLAPSE_CASINO_OUTPUTS
     signup_dt = f"{report_date} {config.SIGNUP_TIME}"
     ftd_dt = f"{report_date} {config.FTD_TIME}"
+    report_date_obj = pd.to_datetime(report_date).date()
     rows: list[list] = []
 
     # === SIGNUP rows ===
-    signup_df = sub[sub[config.COL_SIGNUPS].fillna(0) > 0]
+    # Only include rows where the signup actually happened on the report date.
+    # Stale signups from previous days that are still in the report should not
+    # be re-counted today.
+    signup_dates = pd.to_datetime(sub[config.COL_SIGNUP_DATE], errors="coerce").dt.date
+    signup_df = sub[
+        (sub[config.COL_SIGNUPS].fillna(0) > 0)
+        & (signup_dates == report_date_obj)
+    ]
     for _, r in signup_df.iterrows():
         cid = r[config.COL_CID]
         if pd.isna(cid) or str(cid).strip().lower() in ("na", "nan", ""):
@@ -148,7 +156,12 @@ def _build_rows_for_output(
             rows.append([str(cid), output_cfg["signup_label"], signup_dt, 1, config.CURRENCY])
 
     # === FTD rows ===
-    ftd_df = sub[sub[config.COL_FTDS].fillna(0) > 0]
+    # Same filter — only include FTDs that actually happened on the report date.
+    ftd_dates = pd.to_datetime(sub[config.COL_FTD_DATE], errors="coerce").dt.date
+    ftd_df = sub[
+        (sub[config.COL_FTDS].fillna(0) > 0)
+        & (ftd_dates == report_date_obj)
+    ]
     for _, r in ftd_df.iterrows():
         cid = r[config.COL_CID]
         if pd.isna(cid) or str(cid).strip().lower() in ("na", "nan", ""):
@@ -198,10 +211,17 @@ def _write_template(template_path: Path, rows: list[list], output_path: Path):
         for c in range(1, 6):
             ws.cell(row=r, column=c).value = None
 
-    # Write new rows
+    # Write new rows.
+    # IMPORTANT: column 3 (Conversion Time) must be a string, not a datetime —
+    # the AM's manual workflow stores it as text. The template's existing cell
+    # data_type is 'd' (date), which auto-parses string-looking dates. We
+    # explicitly reset data_type to 's' after writing.
     for i, row_data in enumerate(rows):
         for c, val in enumerate(row_data, start=1):
-            ws.cell(row=first_data_row + i, column=c).value = val
+            cell = ws.cell(row=first_data_row + i, column=c)
+            cell.value = val
+            if c == 3:  # Conversion Time column
+                cell.data_type = "s"
 
     wb.save(output_path)
 
@@ -219,7 +239,7 @@ def process_report(
     # Validate columns
     missing = [c for c in config.REQUIRED_COLUMNS if c not in df.columns]
     if missing:
-        raise ValueError(f"Mungojnë kolonat e nevojshme në raport: {missing}")
+        raise ValueError(f"Required columns missing from report: {missing}")
 
     # Drop Cid == "na" (case-insensitive)
     cid_str = df[config.COL_CID].astype(str).str.strip().str.lower()
@@ -227,7 +247,7 @@ def process_report(
     df = df[~cid_str.isin(["na", "nan", ""])].copy()
     skipped = pre - len(df)
     if skipped:
-        result.warnings.append(f"U përjashtuan {skipped} rreshta me Cid = 'na'.")
+        result.warnings.append(f"Excluded {skipped} rows with Cid = 'na'.")
 
     # Detect report date
     report_date, date_warnings = _detect_report_date(df)
@@ -245,7 +265,7 @@ def process_report(
         for output_cfg in config.OUTPUTS:
             template_path = templates_dir / output_cfg["template"]
             if not template_path.exists():
-                result.warnings.append(f"Mungon template: {template_path.name}")
+                result.warnings.append(f"Missing template: {template_path.name}")
                 continue
 
             rows = _build_rows_for_output(df, output_cfg, report_date, brand_map, unmapped)
@@ -271,9 +291,9 @@ def process_report(
     result.unmapped_brands = sorted(unmapped)
     if unmapped:
         result.warnings.append(
-            f"{len(unmapped)} brand pa hartë (u përdor rregulli i parazgjedhur): "
+            f"{len(unmapped)} unmapped brand(s) (default rule was used): "
             f"{', '.join(sorted(unmapped))}. "
-            f"Shtoji në brand_map.csv për kontroll të plotë."
+            f"Add them to brand_map.csv for full control."
         )
 
     return result
