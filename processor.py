@@ -131,9 +131,16 @@ def _build_rows_for_output(
         )
 
     collapse_casino = output_cfg["key"] in config.COLLAPSE_CASINO_OUTPUTS
-    signup_dt = f"{report_date} {config.SIGNUP_TIME}"
-    ftd_dt = f"{report_date} {config.FTD_TIME}"
     report_date_obj = pd.to_datetime(report_date).date()
+    # Conversion Time as real datetime objects so Excel formats them properly
+    sig_h, sig_m, sig_s = (int(x) for x in config.SIGNUP_TIME.split(":"))
+    ftd_h, ftd_m, ftd_s = (int(x) for x in config.FTD_TIME.split(":"))
+    signup_dt = datetime.combine(report_date_obj, datetime.min.time()).replace(
+        hour=sig_h, minute=sig_m, second=sig_s
+    )
+    ftd_dt = datetime.combine(report_date_obj, datetime.min.time()).replace(
+        hour=ftd_h, minute=ftd_m, second=ftd_s
+    )
     rows: list[list] = []
 
     # === SIGNUP rows ===
@@ -212,16 +219,11 @@ def _write_template(template_path: Path, rows: list[list], output_path: Path):
             ws.cell(row=r, column=c).value = None
 
     # Write new rows.
-    # IMPORTANT: column 3 (Conversion Time) must be a string, not a datetime —
-    # the AM's manual workflow stores it as text. The template's existing cell
-    # data_type is 'd' (date), which auto-parses string-looking dates. We
-    # explicitly reset data_type to 's' after writing.
+    # Conversion Time is written as a real datetime so Excel/Google Ads sees
+    # it as a date value, formatted by the template's existing m/d/yy h:mm.
     for i, row_data in enumerate(rows):
         for c, val in enumerate(row_data, start=1):
-            cell = ws.cell(row=first_data_row + i, column=c)
-            cell.value = val
-            if c == 3:  # Conversion Time column
-                cell.data_type = "s"
+            ws.cell(row=first_data_row + i, column=c).value = val
 
     wb.save(output_path)
 
