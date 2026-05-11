@@ -1,32 +1,43 @@
-report_brand_name,clean_name,category
-32red,32red,casino
-32Red-UK-Casino,32red,casino
-32Red-Casino-GB,32red,casino
-Betfred-UK-Casino,betfredcasino,casino
-Betfred-Casino-GB,betfredcasino,casino
-Betfred-Sportsbetting-GB,betfredsportsbetting,sport
-Boyle-UK-Casino,boylecasino,casino
-Boyle-Casino-GB,boylecasino,casino
-Casumo-UK-Casino,casumo,casino
-Casumo-Casino-GB,casumo,casino
-Coral-Casino-GB,coral,casino
-Coral-UK-Casino,coral,casino
-Coral-Sportsbetting-GB,coralsportsbetting,sport
-GrandIvy-Sportsbetting-GB,grandivysportsbetting,sport
-Grosvenor-UK-Casino,grosvenor,casino
-Grosvenor-Casino-GB,grosvenor,casino
-Ladbrokes-UK-Casino,ladbrokes,casino
-Ladbrokes-Casino-GB,ladbrokes,casino
-Ladbrokes-Sportsbetting-GB,ladbrokes,sport
-LottoGo-UK-Casino,lottogo,casino
-LottoGo-Casino-GB,lottogo,casino
-Midnite-UK-Casino,midnite,casino
-Midnite-Casino-GB,midnite,casino
-TheSunVegas-UK-Casino,thesunvegas,casino
-TheSunVegas-Casino-GB,thesunvegas,casino
-Unibet-UK-Casino,unibet,casino
-Unibet-Casino-GB,unibet,casino
-Mecca-Bingo-GB,mecca,bingo
-meccabingo,mecca,bingo
-WinkBingo-Bingo-GB,winkbingo,bingo
-dottybingo,dotty,bingo
+report_brand_name,clean_name,category,output_key
+32red,32red,casino,
+32Red-UK-Casino,32red,casino,
+32Red-Casino-GB,32red,casino,
+32Red-Casino-GB,32red slots,casino,uk1_google
+32Red-Casino-GB,32red slots,casino,uk2_bing
+32Red-Casino-GB,32red slots,casino,uk3_bing
+888Ladies-Bingo-GB,888ladies,bingo,
+thesunbingo,sunbingo,bingo,
+DottyBingo-Bingo-GB,dotty,bingo,
+dottybingo,dotty,bingo,
+Betfred-UK-Casino,betfredcasino,casino,
+Betfred-Casino-GB,betfredcasino,casino,
+Betfred-Sportsbetting-GB,betfred sports,sport,
+Boyle-UK-Casino,boylecasino,casino,
+Boyle-Casino-GB,boylecasino,casino,
+Casumo-UK-Casino,casumo,casino,
+Casumo-Casino-GB,casumo,casino,
+Coral-Casino-GB,coral,casino,
+Coral-UK-Casino,coral,casino,
+Coral-Sportsbetting-GB,coral sports,sport,
+GrandIvy-Sportsbetting-GB,grandivy sports,sport,
+Grosvenor-UK-Casino,grosvenor,casino,
+Grosvenor-Casino-GB,grosvenor,casino,
+Ladbrokes-UK-Casino,ladbrokes,casino,
+Ladbrokes-Casino-GB,ladbrokes,casino,
+Ladbrokes-Sportsbetting-GB,ladbrokes,sport,
+LottoGo-UK-Casino,lottogo,casino,
+LottoGo-Casino-GB,lottogo,casino,
+LottoGo-Casino-GB,Lottogo,casino,uk1_google
+LottoGo-Casino-GB,Lottogo,casino,uk2_bing
+LottoGo-Casino-GB,Lottogo,casino,uk3_bing
+Midnite-UK-Casino,midnite,casino,
+Midnite-Casino-GB,midnite,casino,
+Pub-UK-Casino,pub,casino,
+SpreadEx-Sportsbetting-GB,spreadex sports,sport,
+TheSunVegas-UK-Casino,thesunvegas,casino,
+TheSunVegas-Casino-GB,thesunvegas,casino,
+Unibet-UK-Casino,unibet,casino,
+Unibet-Casino-GB,unibet,casino,
+Mecca-Bingo-GB,mecca,bingo,
+meccabingo,mecca,bingo,
+WinkBingo-Bingo-GB,winkbingo,bingo,

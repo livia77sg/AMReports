@@ -53,29 +53,46 @@ def _detect_category_fallback(raw: str) -> str:
     return "sport"  # default
 
 
-def load_brand_map(csv_path: Path) -> dict[str, tuple[str, str]]:
-    """Load brand_map.csv → {report_name: (clean_name, category)}.
-    Lookup is case-insensitive."""
+def load_brand_map(csv_path: Path) -> dict[tuple[str, str], tuple[str, str]]:
+    """Load brand_map.csv → {(report_name_lower, output_key): (clean_name, category)}.
+
+    `output_key` may be empty string ("") which means "default for all outputs".
+    Lookup at resolve time first tries (name, specific_output_key), then falls
+    back to (name, "")."""
     if not csv_path.exists():
         return {}
-    df = pd.read_csv(csv_path)
-    return {
-        str(row["report_brand_name"]).strip().lower(): (
-            str(row["clean_name"]).strip(),
-            str(row["category"]).strip().lower(),
-        )
-        for _, row in df.iterrows()
-    }
+    df = pd.read_csv(csv_path).fillna("")
+    out: dict[tuple[str, str], tuple[str, str]] = {}
+    for _, row in df.iterrows():
+        name = str(row["report_brand_name"]).strip().lower()
+        ok = str(row.get("output_key", "")).strip().lower()
+        clean = str(row["clean_name"]).strip()
+        cat = str(row["category"]).strip().lower()
+        out[(name, ok)] = (clean, cat)
+    return out
 
 
-def resolve_brand(raw: str, brand_map: dict[str, tuple[str, str]]) -> tuple[str, str, bool]:
+def resolve_brand(
+    raw: str,
+    brand_map: dict[tuple[str, str], tuple[str, str]],
+    output_key: str,
+) -> tuple[str, str, bool]:
     """Return (clean_name, category, was_mapped).
-    Falls back to heuristics if not in map."""
+
+    Resolution order:
+      1. (raw_lower, output_key) — output-specific override
+      2. (raw_lower, "") — global default
+      3. heuristic fallback (lowercase + suffix strip)
+    """
     if pd.isna(raw):
         return ("", "sport", False)
     key = str(raw).strip().lower()
-    if key in brand_map:
-        clean, cat = brand_map[key]
+    ok = output_key.strip().lower()
+    if (key, ok) in brand_map:
+        clean, cat = brand_map[(key, ok)]
+        return (clean, cat, True)
+    if (key, "") in brand_map:
+        clean, cat = brand_map[(key, "")]
         return (clean, cat, True)
     return (_normalize_brand_fallback(str(raw)), _detect_category_fallback(str(raw)), False)
 
@@ -164,11 +181,15 @@ def _build_rows_for_output(
 
     # === FTD rows ===
     # Same filter — only include FTDs that actually happened on the report date.
+    # We collect brand-name rows and generic "ftds" rows separately so the final
+    # output is: signups → all brand rows (or casino-collapse rows) → all ftds rows.
     ftd_dates = pd.to_datetime(sub[config.COL_FTD_DATE], errors="coerce").dt.date
     ftd_df = sub[
         (sub[config.COL_FTDS].fillna(0) > 0)
         & (ftd_dates == report_date_obj)
     ]
+    brand_rows: list[list] = []
+    ftds_rows: list[list] = []
     for _, r in ftd_df.iterrows():
         cid = r[config.COL_CID]
         if pd.isna(cid) or str(cid).strip().lower() in ("na", "nan", ""):
@@ -179,19 +200,28 @@ def _build_rows_for_output(
         # Per-FTD revenue split: if a row has multiple FTDs, divide and round
         per_ftd_rev = int(round(revenue_int / n_ftds)) if n_ftds > 0 else revenue_int
 
-        clean, category, mapped = resolve_brand(r[config.COL_BRAND], brand_map)
+        clean, category, mapped = resolve_brand(r[config.COL_BRAND], brand_map, output_cfg["key"])
         if not mapped and pd.notna(r[config.COL_BRAND]):
             unmapped_brands.add(str(r[config.COL_BRAND]))
 
         for _ in range(n_ftds):
             if category == "casino" and collapse_casino:
-                # Single row labeled as the output's casino_label
-                rows.append([str(cid), output_cfg["casino_label"], ftd_dt, per_ftd_rev, config.CURRENCY])
+                # Single row labeled as the output's casino_label.
+                # Goes in the brand_rows bucket since it occupies the brand slot.
+                brand_rows.append(
+                    [str(cid), output_cfg["casino_label"], ftd_dt, per_ftd_rev, config.CURRENCY]
+                )
             else:
-                # Two-row treatment: per-brand row + generic ftds row
-                rows.append([str(cid), f"{output_cfg['brand_prefix']}{clean}", ftd_dt, per_ftd_rev, config.CURRENCY])
-                rows.append([str(cid), output_cfg["ftd_label"], ftd_dt, per_ftd_rev, config.CURRENCY])
+                # Two-row treatment: brand row goes in brand_rows, generic ftds row at the end
+                brand_rows.append(
+                    [str(cid), f"{output_cfg['brand_prefix']}{clean}", ftd_dt, per_ftd_rev, config.CURRENCY]
+                )
+                ftds_rows.append(
+                    [str(cid), output_cfg["ftd_label"], ftd_dt, per_ftd_rev, config.CURRENCY]
+                )
 
+    rows.extend(brand_rows)
+    rows.extend(ftds_rows)
     return rows
 
 
@@ -205,8 +235,23 @@ def _find_header_row(ws) -> int:
     raise ValueError("Could not find header row in template.")
 
 
-def _write_template(template_path: Path, rows: list[list], output_path: Path):
-    """Open template, clear existing example data rows, write new rows, save."""
+def _write_template(
+    template_path: Path,
+    rows: list[list],
+    output_path: Path,
+    output_key: str,
+):
+    """Open template, clear existing example data rows, write new rows, save.
+
+    Forces explicit number_format per column so output rows don't inherit weird
+    formats from the template's example cells (e.g. scientific notation on Cid
+    column, or stale date formats partway through). Also clears any background
+    fill on data cells (Sport_Google template ships with blue fill on example
+    rows; AM expects white).
+    """
+    from openpyxl.styles import PatternFill
+    no_fill = PatternFill(fill_type=None)
+
     wb = load_workbook(template_path)
     ws = wb.active
     header_row = _find_header_row(ws)
@@ -216,14 +261,26 @@ def _write_template(template_path: Path, rows: list[list], output_path: Path):
     last_existing = ws.max_row
     for r in range(first_data_row, last_existing + 1):
         for c in range(1, 6):
-            ws.cell(row=r, column=c).value = None
+            cell = ws.cell(row=r, column=c)
+            cell.value = None
+            cell.number_format = "General"
+            cell.fill = no_fill
 
-    # Write new rows.
-    # Conversion Time is written as a real datetime so Excel/Google Ads sees
-    # it as a date value, formatted by the template's existing m/d/yy h:mm.
+    # Per-column number_format we explicitly set on every written row.
+    column_formats = {
+        1: "General",       # Cid
+        2: "General",       # Conversion Name
+        3: "m/d/yy h:mm",   # Conversion Time
+        4: "General",       # Conversion Value
+        5: "General",       # Currency
+    }
+
     for i, row_data in enumerate(rows):
         for c, val in enumerate(row_data, start=1):
-            ws.cell(row=first_data_row + i, column=c).value = val
+            cell = ws.cell(row=first_data_row + i, column=c)
+            cell.value = val
+            cell.number_format = column_formats[c]
+            cell.fill = no_fill
 
     wb.save(output_path)
 
@@ -284,10 +341,13 @@ def process_report(
             # report the row count to the user, which is what they care about.
             result.total_ftds += ftd_count
 
-            # Always produce the file even if empty (so she sees that nothing came through)
+            # Skip empty outputs — no point in producing an xlsx with zero data rows
+            if not rows:
+                continue
+
             out_filename = f"{output_cfg['output_prefix']}_{report_date}.xlsx"
             out_path = tmp / out_filename
-            _write_template(template_path, rows, out_path)
+            _write_template(template_path, rows, out_path, output_cfg["key"])
             result.output_files[out_filename] = out_path.read_bytes()
 
     result.unmapped_brands = sorted(unmapped)
