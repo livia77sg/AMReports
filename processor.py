@@ -256,6 +256,9 @@ def _build_rows_paired_ftd(
                     [str(cid), output_cfg["ftd_label"], ftd_dt, per_ftd_rev, config.CURRENCY]
                 )
 
+    # Sort brand rows alphabetically by conversion name (column index 1).
+    # Generic ftds rows stay grouped at the end in insertion order.
+    brand_rows.sort(key=lambda r: str(r[1]).lower())
     rows.extend(brand_rows)
     rows.extend(ftds_rows)
     return rows
@@ -328,7 +331,8 @@ def _build_rows_cpa(
             # separately so the UI can show a precise diagnostic.
             missing_cpa.add((str(raw_brand), vertical))
             continue
-        # Use the actual signup datetime from the report, truncated to minutes
+        # Use the actual signup datetime from the report, dropping seconds
+        # to match how the AM displays times in her files (minute precision)
         sig_time = pd.to_datetime(r[config.COL_SIGNUP_DATE])
         if pd.isna(sig_time):
             continue
@@ -362,8 +366,10 @@ def _build_rows_cpa(
                 [str(cid), output_cfg["sales_label"], f_dt, 1, config.CURRENCY]
             )
 
-    # Order: brand-name signup rows first, then converted-leads signup rows, then sales rows.
-    # AM's HW Google example shows: 4 brand rows, then 4 converted-leads rows.
+    # Order: brand-name signup rows first (alphabetical), then converted-leads
+    # signup rows, then sales rows. AM's HW Google example shows: brand rows,
+    # then converted-leads rows. Brand rows are sorted by conversion name.
+    signup_brand_rows.sort(key=lambda r: str(r[1]).lower())
     rows: list[list] = []
     rows.extend(signup_brand_rows)
     rows.extend(signup_leads_rows)
@@ -421,22 +427,28 @@ def _write_template(
     header_row = _find_header_row(ws)
     first_data_row = header_row + 1
 
-    # Clear existing example data rows (templates ship with sample data)
+    # Clear existing example data rows (templates ship with sample data).
+    # We clear columns 1-6: 1-5 are the actual data columns, and column 6 is
+    # cleared because some templates have annotation comments there (e.g.
+    # "(same as brand's deal)") that the AMs don't include in real reports.
     last_existing = ws.max_row
     for r in range(first_data_row, last_existing + 1):
-        for c in range(1, 6):
+        for c in range(1, 7):
             cell = ws.cell(row=r, column=c)
             cell.value = None
             cell.number_format = "General"
             cell.fill = no_fill
 
     # Per-column number_format we explicitly set on every written row.
+    # The [$-409] prefix on the time column forces US English locale so dates
+    # always display as month/day/year, even if the viewer's Excel is set to
+    # a European regional format (which would otherwise flip to dd/mm/yyyy).
     column_formats = {
-        1: "General",       # Cid
-        2: "General",       # Conversion Name
-        3: "m/d/yy h:mm",   # Conversion Time
-        4: "General",       # Conversion Value
-        5: "General",       # Currency
+        1: "General",                       # Cid
+        2: "General",                       # Conversion Name
+        3: "[$-409]m/d/yyyy h:mm;@",        # Conversion Time (locale-forced m/d/yyyy)
+        4: "General",                       # Conversion Value
+        5: "General",                       # Currency
     }
 
     for i, row_data in enumerate(rows):
