@@ -15,6 +15,7 @@ from processor import process_report
 BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 BRAND_MAP_PATH = BASE_DIR / "brand_map.csv"
+BRAND_VALUES_PATH = BASE_DIR / "brand_values.csv"
 
 st.set_page_config(page_title="Offline Conversions — Automation", page_icon="📊", layout="centered")
 
@@ -91,6 +92,7 @@ if process_clicked and uploaded:
                 report_bytes=uploaded.read(),
                 templates_dir=TEMPLATES_DIR,
                 brand_map_path=BRAND_MAP_PATH,
+                brand_values_path=BRAND_VALUES_PATH,
             )
         # Cache the result so downloads don't re-trigger processing
         st.session_state.result = result
@@ -132,6 +134,24 @@ if result is not None:
             )
             st.code("\n".join(result.unmapped_brands))
 
+    if getattr(result, "missing_cpa_brands", None):
+        with st.expander(
+            f"💰 Brands missing CPA value ({len(getattr(result, 'missing_cpa_brands', []))})",
+            expanded=True,
+        ):
+            st.write(
+                "These brands are mapped in `brand_map.csv` but **don't have a CPA value** "
+                "in `brand_values.csv` — so their rows were **skipped**. "
+                "Add them to `brand_values.csv` with the correct value to include them."
+            )
+            # Group by vertical for clarity
+            by_vertical = {}
+            for raw, vert in getattr(result, "missing_cpa_brands", []):
+                by_vertical.setdefault(vert, []).append(raw)
+            for vert in sorted(by_vertical):
+                st.write(f"**{vert.upper()}:**")
+                st.code("\n".join(sorted(by_vertical[vert])))
+
     # ZIP download
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -172,3 +192,15 @@ with st.expander("⚙️ Brand map (brand_map.csv)"):
             st.code(f.read(), language="csv")
     else:
         st.warning(f"Missing `brand_map.csv` at {BRAND_MAP_PATH}")
+
+with st.expander("💰 Brand values / CPA (brand_values.csv)"):
+    if BRAND_VALUES_PATH.exists():
+        st.caption(
+            f"Location: `{BRAND_VALUES_PATH}` — per-brand fixed CPA values "
+            "for the HW (Home Warranty) and CW (Car Warranty) verticals. "
+            "Edit when rates change."
+        )
+        with open(BRAND_VALUES_PATH) as f:
+            st.code(f.read(), language="csv")
+    else:
+        st.warning(f"Missing `brand_values.csv` at {BRAND_VALUES_PATH}")

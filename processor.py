@@ -26,6 +26,9 @@ class ProcessResult:
     per_output_counts: dict[str, dict] = field(default_factory=dict)  # key -> {signups, ftd_lines}
     warnings: list[str] = field(default_factory=list)
     unmapped_brands: list[str] = field(default_factory=list)
+    # Brands that ARE in brand_map.csv but missing a CPA in brand_values.csv.
+    # Only applies to cpa-pattern outputs (HW/CW). Each entry is (raw_brand, vertical).
+    missing_cpa_brands: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _normalize_brand_fallback(raw: str) -> str:
@@ -265,6 +268,7 @@ def _build_rows_cpa(
     brand_map: dict,
     brand_values: dict,
     unmapped_brands: set[str],
+    missing_cpa: set[tuple[str, str]],
 ) -> list[list]:
     """Build rows for HW/CW-style outputs (cpa pattern):
 
@@ -320,9 +324,9 @@ def _build_rows_cpa(
         # Look up the CPA value
         cpa = resolve_brand_value(clean_name, vertical, brand_values)
         if cpa is None:
-            # No CPA known — record the brand and skip; we can't write a row
-            # without a value.
-            unmapped_brands.add(str(raw_brand))
+            # No CPA known — different problem from unmapped. Record it
+            # separately so the UI can show a precise diagnostic.
+            missing_cpa.add((str(raw_brand), vertical))
             continue
         # Use the actual signup datetime from the report, truncated to minutes
         sig_time = pd.to_datetime(r[config.COL_SIGNUP_DATE])
@@ -374,11 +378,14 @@ def _build_rows_for_output(
     brand_map: dict,
     brand_values: dict,
     unmapped_brands: set[str],
+    missing_cpa: set[tuple[str, str]],
 ) -> list[list]:
     """Dispatcher that picks the right row-builder based on output pattern."""
     pattern = output_cfg.get("pattern", "paired_ftd")
     if pattern == "cpa":
-        return _build_rows_cpa(df, output_cfg, report_date, brand_map, brand_values, unmapped_brands)
+        return _build_rows_cpa(
+            df, output_cfg, report_date, brand_map, brand_values, unmapped_brands, missing_cpa
+        )
     return _build_rows_paired_ftd(df, output_cfg, report_date, brand_map, unmapped_brands)
 
 
@@ -475,6 +482,7 @@ def process_report(
     brand_map = load_brand_map(brand_map_path)
     brand_values = load_brand_values(brand_values_path) if brand_values_path else {}
     unmapped: set[str] = set()
+    missing_cpa: set[tuple[str, str]] = set()
 
     # Process each output
     import tempfile
@@ -487,7 +495,7 @@ def process_report(
                 continue
 
             rows = _build_rows_for_output(
-                df, output_cfg, report_date, brand_map, brand_values, unmapped
+                df, output_cfg, report_date, brand_map, brand_values, unmapped, missing_cpa
             )
 
             # Count for summary — different patterns count differently.
@@ -522,9 +530,24 @@ def process_report(
     result.unmapped_brands = sorted(unmapped)
     if unmapped:
         result.warnings.append(
-            f"{len(unmapped)} unmapped brand(s) (default rule was used): "
+            f"{len(unmapped)} brand(s) not in brand_map.csv (default rule was used): "
             f"{', '.join(sorted(unmapped))}. "
             f"Add them to brand_map.csv for full control."
+        )
+
+    result.missing_cpa_brands = sorted(missing_cpa)
+    if missing_cpa:
+        # Group by vertical for a cleaner message
+        by_vertical: dict[str, list[str]] = {}
+        for raw, vert in missing_cpa:
+            by_vertical.setdefault(vert, []).append(raw)
+        lines = []
+        for vert in sorted(by_vertical):
+            lines.append(f"  {vert.upper()}: {', '.join(sorted(by_vertical[vert]))}")
+        result.warnings.append(
+            f"{len(missing_cpa)} brand(s) missing a CPA value in brand_values.csv — "
+            f"these rows were SKIPPED. Add them to brand_values.csv with the correct value:\n"
+            + "\n".join(lines)
         )
 
     return result
