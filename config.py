@@ -25,10 +25,16 @@ BING_CID_PREFIX = "m_"
 #   output_prefix:  prefix for the generated file name
 #   site_ids:       list of SiteIds belonging to this output
 #   channel:        "google" or "bing"
+#   pattern:        "paired_ftd" (default — sport/bingo/casino) or "cpa" (HW/CW)
+#       paired_ftd: signups = 1 row at fixed 23:55, value=1
+#                   ftds = 2 rows at fixed 23:58 (brand + generic ftds), value=rounded revenue
+#       cpa:        signups = 2 rows at actual report time
+#                   (signup_label + brand label), value = brand's fixed CPA
+#                   ftds = 1 row at actual report time labeled by sales_label, value=1
 #   signup_label:   exact wording for the signup row's Conversion Name
-#                   (taken from each template to match what the AM expects)
-#   ftd_label:      exact wording for the bare "ftds" row (non-casino)
-#   casino_label:   exact wording for the collapsed casino row
+#   ftd_label:      [paired_ftd] exact wording for the bare "ftds" row
+#   casino_label:   [paired_ftd] exact wording for the collapsed casino row
+#   sales_label:    [cpa] label for the single FTD row (e.g. "offline - sales")
 #   brand_prefix:   prefix used when writing per-brand rows (e.g. "offline - ")
 OUTPUTS = [
     {
@@ -37,6 +43,7 @@ OUTPUTS = [
         "output_prefix": "Sport_Conversion_Google",
         "site_ids": [24],
         "channel": "google",
+        "pattern": "paired_ftd",
         "signup_label": "offline conversion - signup",
         "ftd_label": "offline - ftds",
         "casino_label": "offline - ftdcasino",
@@ -109,6 +116,60 @@ OUTPUTS = [
         "signup_label": "offline - signup",
         "ftd_label": "offline - ftds",
         "casino_label": "offline - ftdcasino",
+        "brand_prefix": "offline - ",
+    },
+    # === Home Warranty (HW) — siteid 692 ===
+    # Signups = 2 rows at actual report datetime: ("offline - converted leads", value=brand CPA)
+    # + ("offline - {brand}", value=brand CPA).
+    # FTDs = 1 row labeled "offline - sales", value=1.
+    {
+        "key": "hw_google",
+        "template": "HW_Conversion_Google_-_Template.xlsx",
+        "output_prefix": "HW_Conversion_Google",
+        "site_ids": [692],
+        "channel": "google",
+        "pattern": "cpa",
+        "vertical": "hw",
+        "signup_label": "offline - converted leads",
+        "sales_label": "offline - sales",
+        "brand_prefix": "offline - ",
+    },
+    {
+        "key": "hw_bing",
+        "template": "HW_Conversion_Bing_-_Template.xlsx",
+        "output_prefix": "HW_Conversion_Bing",
+        "site_ids": [692],
+        "channel": "bing",
+        "pattern": "cpa",
+        "vertical": "hw",
+        "signup_label": "offline - converted leads",
+        "sales_label": "offline - sales",
+        "brand_prefix": "offline - ",
+    },
+    # === Car Warranty (CW) — siteid 693 ===
+    # Same as HW but with CW-specific brand list and CPA values.
+    {
+        "key": "cw_google",
+        "template": "CW_Conversion_Google_-_Template.xlsx",
+        "output_prefix": "CW_Conversion_Google",
+        "site_ids": [693],
+        "channel": "google",
+        "pattern": "cpa",
+        "vertical": "cw",
+        "signup_label": "offline - converted leads",
+        "sales_label": "offline - sales",
+        "brand_prefix": "offline - ",
+    },
+    {
+        "key": "cw_bing",
+        "template": "CW_Conversion_Bing_-_Template.xlsx",
+        "output_prefix": "CW_Conversion_Bing",
+        "site_ids": [693],
+        "channel": "bing",
+        "pattern": "cpa",
+        "vertical": "cw",
+        "signup_label": "offline - converted leads",
+        "sales_label": "offline - sales",
         "brand_prefix": "offline - ",
     },
 ]

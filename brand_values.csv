@@ -1,0 +1,20 @@
+clean_name,vertical,value
+choice hw,hw,100
+select hw,hw,110
+first american,hw,110
+first premier,hw,75
+hwa,hw,90
+hsc,hw,90
+choice,hw,100
+select,hw,110
+afc,hw,500
+american dream,cw,70
+premier auto protect,cw,50
+select auto protect,cw,65
+chaiz,cw,80
+autopom,cw,55
+choice hw,cw,100
+select hw,cw,120
+first american hw,cw,95
+carchex,cw,65
+carshield,cw,65

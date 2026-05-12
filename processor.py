@@ -53,6 +53,38 @@ def _detect_category_fallback(raw: str) -> str:
     return "sport"  # default
 
 
+def load_brand_values(csv_path: Path) -> dict[tuple[str, str], int]:
+    """Load brand_values.csv → {(clean_name_lower, vertical_lower): value}.
+
+    Brand values are looked up by the clean (resolved) brand name and vertical
+    (e.g. "hw" or "cw"). Per AM clarification, values are consistent across
+    Google/Bing within a vertical, so no per-output key is needed here.
+    """
+    if not csv_path.exists():
+        return {}
+    df = pd.read_csv(csv_path).fillna("")
+    out: dict[tuple[str, str], int] = {}
+    for _, row in df.iterrows():
+        clean = str(row["clean_name"]).strip().lower()
+        vertical = str(row["vertical"]).strip().lower()
+        try:
+            value = int(round(float(row["value"])))
+        except (ValueError, TypeError):
+            continue
+        out[(clean, vertical)] = value
+    return out
+
+
+def resolve_brand_value(
+    clean_name: str,
+    vertical: str,
+    brand_values: dict[tuple[str, str], int],
+) -> int | None:
+    """Look up the fixed CPA value for a brand in a vertical. Returns None if
+    not in the map — caller decides what to do (warn, default, skip)."""
+    return brand_values.get((clean_name.strip().lower(), vertical.strip().lower()))
+
+
 def load_brand_map(csv_path: Path) -> dict[tuple[str, str], tuple[str, str]]:
     """Load brand_map.csv → {(report_name_lower, output_key): (clean_name, category)}.
 
@@ -120,15 +152,16 @@ def _detect_report_date(df: pd.DataFrame) -> tuple[str, list[str]]:
     return (most_common.strftime("%Y-%m-%d"), warnings)
 
 
-def _build_rows_for_output(
+def _build_rows_paired_ftd(
     df: pd.DataFrame,
     output_cfg: dict,
     report_date: str,
     brand_map: dict,
     unmapped_brands: set[str],
 ) -> list[list]:
-    """Build the rows (Cid, ConversionName, Time, Value, Currency) to append
-    to the template for one output (sport_google, bingo_bing, etc.).
+    """Build rows for sport/bingo/casino-style outputs (paired_ftd pattern):
+    - signups = 1 row at fixed 23:55, value=1
+    - ftds = 2 rows at fixed 23:58 (brand + generic ftds), value=rounded revenue
     """
     site_ids = output_cfg["site_ids"]
     types = config.CHANNEL_TYPES[output_cfg["channel"]]
@@ -225,6 +258,130 @@ def _build_rows_for_output(
     return rows
 
 
+def _build_rows_cpa(
+    df: pd.DataFrame,
+    output_cfg: dict,
+    report_date: str,
+    brand_map: dict,
+    brand_values: dict,
+    unmapped_brands: set[str],
+) -> list[list]:
+    """Build rows for HW/CW-style outputs (cpa pattern):
+
+    - Signups = 2 rows per signup, both at the row's actual Signup Date (real datetime):
+        1. ("offline - {brand_clean}", value = brand CPA)
+        2. ("offline - converted leads", value = brand CPA)
+    - FTDs = 1 row per ftd at the row's actual FtdDate, labeled by sales_label,
+      value = 1.
+
+    Brand cleaning uses brand_map.csv (shared with paired_ftd outputs).
+    Brand values come from brand_values.csv keyed on (clean_name, vertical).
+    Brands not in either map are skipped with a warning.
+    """
+    site_ids = output_cfg["site_ids"]
+    types = config.CHANNEL_TYPES[output_cfg["channel"]]
+    vertical = output_cfg["vertical"]  # "hw" or "cw"
+
+    sub = df[
+        df[config.COL_SITE_ID].isin(site_ids)
+        & df[config.COL_TYPE].astype(str).str.lower().isin([t.lower() for t in types])
+    ].copy()
+    if sub.empty:
+        return []
+
+    if output_cfg["channel"] == "bing":
+        sub[config.COL_CID] = sub[config.COL_CID].astype(str).apply(
+            lambda c: c[len(config.BING_CID_PREFIX):] if c.startswith(config.BING_CID_PREFIX) else c
+        )
+
+    signup_brand_rows: list[list] = []   # (offline - {brand}) rows
+    signup_leads_rows: list[list] = []   # (offline - converted leads) rows
+    sales_rows: list[list] = []          # (offline - sales) rows
+
+    report_date_obj = pd.to_datetime(report_date).date()
+
+    # --- Signups ---
+    signup_dates_only = pd.to_datetime(sub[config.COL_SIGNUP_DATE], errors="coerce").dt.date
+    signup_df = sub[
+        (sub[config.COL_SIGNUPS].fillna(0) > 0)
+        & (signup_dates_only == report_date_obj)
+    ]
+    for _, r in signup_df.iterrows():
+        cid = r[config.COL_CID]
+        if pd.isna(cid) or str(cid).strip().lower() in ("na", "nan", ""):
+            continue
+        raw_brand = r[config.COL_BRAND]
+        if pd.isna(raw_brand):
+            continue
+        # Resolve brand via the shared brand_map
+        clean_name, _category, mapped = resolve_brand(raw_brand, brand_map, output_cfg["key"])
+        if not mapped:
+            unmapped_brands.add(str(raw_brand))
+        # Look up the CPA value
+        cpa = resolve_brand_value(clean_name, vertical, brand_values)
+        if cpa is None:
+            # No CPA known — record the brand and skip; we can't write a row
+            # without a value.
+            unmapped_brands.add(str(raw_brand))
+            continue
+        # Use the actual signup datetime from the report, truncated to minutes
+        sig_time = pd.to_datetime(r[config.COL_SIGNUP_DATE])
+        if pd.isna(sig_time):
+            continue
+        sig_dt = sig_time.to_pydatetime().replace(second=0, microsecond=0)
+        n = int(r[config.COL_SIGNUPS])
+        for _ in range(n):
+            signup_brand_rows.append(
+                [str(cid), f"{output_cfg['brand_prefix']}{clean_name}", sig_dt, cpa, config.CURRENCY]
+            )
+            signup_leads_rows.append(
+                [str(cid), output_cfg["signup_label"], sig_dt, cpa, config.CURRENCY]
+            )
+
+    # --- FTDs (sales) ---
+    ftd_dates_only = pd.to_datetime(sub[config.COL_FTD_DATE], errors="coerce").dt.date
+    ftd_df = sub[
+        (sub[config.COL_FTDS].fillna(0) > 0)
+        & (ftd_dates_only == report_date_obj)
+    ]
+    for _, r in ftd_df.iterrows():
+        cid = r[config.COL_CID]
+        if pd.isna(cid) or str(cid).strip().lower() in ("na", "nan", ""):
+            continue
+        ftd_time = pd.to_datetime(r[config.COL_FTD_DATE])
+        if pd.isna(ftd_time):
+            continue
+        f_dt = ftd_time.to_pydatetime().replace(second=0, microsecond=0)
+        n_ftds = int(r[config.COL_FTDS])
+        for _ in range(n_ftds):
+            sales_rows.append(
+                [str(cid), output_cfg["sales_label"], f_dt, 1, config.CURRENCY]
+            )
+
+    # Order: brand-name signup rows first, then converted-leads signup rows, then sales rows.
+    # AM's HW Google example shows: 4 brand rows, then 4 converted-leads rows.
+    rows: list[list] = []
+    rows.extend(signup_brand_rows)
+    rows.extend(signup_leads_rows)
+    rows.extend(sales_rows)
+    return rows
+
+
+def _build_rows_for_output(
+    df: pd.DataFrame,
+    output_cfg: dict,
+    report_date: str,
+    brand_map: dict,
+    brand_values: dict,
+    unmapped_brands: set[str],
+) -> list[list]:
+    """Dispatcher that picks the right row-builder based on output pattern."""
+    pattern = output_cfg.get("pattern", "paired_ftd")
+    if pattern == "cpa":
+        return _build_rows_cpa(df, output_cfg, report_date, brand_map, brand_values, unmapped_brands)
+    return _build_rows_paired_ftd(df, output_cfg, report_date, brand_map, unmapped_brands)
+
+
 def _find_header_row(ws) -> int:
     """Locate the row that starts with 'Microsoft Click ID' or 'Google Click ID'.
     Data rows go directly below it. Returns 1-indexed row number."""
@@ -289,6 +446,7 @@ def process_report(
     report_bytes: bytes,
     templates_dir: Path,
     brand_map_path: Path,
+    brand_values_path: Path | None = None,
 ) -> ProcessResult:
     """Main entry point. Read raw Track360 report bytes, return ProcessResult
     with all output files in memory."""
@@ -313,8 +471,9 @@ def process_report(
     result.report_date = report_date
     result.warnings.extend(date_warnings)
 
-    # Load brand map
+    # Load brand map + per-vertical brand values (CPA table)
     brand_map = load_brand_map(brand_map_path)
+    brand_values = load_brand_values(brand_values_path) if brand_values_path else {}
     unmapped: set[str] = set()
 
     # Process each output
@@ -327,18 +486,28 @@ def process_report(
                 result.warnings.append(f"Missing template: {template_path.name}")
                 continue
 
-            rows = _build_rows_for_output(df, output_cfg, report_date, brand_map, unmapped)
+            rows = _build_rows_for_output(
+                df, output_cfg, report_date, brand_map, brand_values, unmapped
+            )
 
-            # Count for summary
-            sig_count = sum(1 for r in rows if "signup" in r[1].lower())
-            ftd_count = len(rows) - sig_count
+            # Count for summary — different patterns count differently.
+            # paired_ftd: signup_label rows are signups; everything else is ftds.
+            # cpa: signup_label + brand rows (when at signup time) are signups;
+            #      sales_label rows are ftds.
+            pattern = output_cfg.get("pattern", "paired_ftd")
+            if pattern == "cpa":
+                sales_label = output_cfg.get("sales_label", "")
+                ftd_count = sum(1 for r in rows if r[1] == sales_label)
+                sig_count = len(rows) - ftd_count
+            else:
+                sig_label = output_cfg.get("signup_label", "")
+                sig_count = sum(1 for r in rows if r[1] == sig_label)
+                ftd_count = len(rows) - sig_count
             result.per_output_counts[output_cfg["key"]] = {
                 "signups": sig_count,
                 "ftd_rows": ftd_count,
             }
             result.total_signups += sig_count
-            # Each non-collapsed FTD writes 2 rows; collapsed writes 1 — but we just
-            # report the row count to the user, which is what they care about.
             result.total_ftds += ftd_count
 
             # Skip empty outputs — no point in producing an xlsx with zero data rows
