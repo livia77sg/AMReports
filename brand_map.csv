@@ -11,15 +11,22 @@ DottyBingo-Bingo-GB,dotty,bingo,
 dottybingo,dotty,bingo,
 Betfred-UK-Casino,betfredcasino,casino,
 Betfred-Casino-GB,betfredcasino,casino,
+Betfred-UK-Casino,betfred,casino,uk1_google
+Betfred-Casino-GB,betfred,casino,uk1_google
 Betfred-Sportsbetting-GB,betfred sports,sport,
 Boyle-UK-Casino,boylecasino,casino,
 Boyle-Casino-GB,boylecasino,casino,
+Boyle-UK-Casino,boyle sports,casino,sport_google
+Boyle-UK-Casino,boyle sports,casino,sport_bing
+Boyle-Casino-GB,boyle sports,casino,sport_google
+Boyle-Casino-GB,boyle sports,casino,sport_bing
+Boyle-Sportsbetting-GB,boyle sports,sport,
 Casumo-UK-Casino,casumo,casino,
 Casumo-Casino-GB,casumo,casino,
 Coral-Casino-GB,coral,casino,
 Coral-UK-Casino,coral,casino,
 Coral-Sportsbetting-GB,coral,sport,
-GrandIvy-Sportsbetting-GB,grandivy sports,sport,
+GrandIvy-Sportsbetting-GB,grandivy,sport,
 Grosvenor-UK-Casino,grosvenor,casino,
 Grosvenor-Casino-GB,grosvenor,casino,
 Ladbrokes-UK-Casino,ladbrokes,casino,
@@ -36,11 +43,17 @@ Pub-UK-Casino,pub,casino,
 SpreadEx-Sportsbetting-GB,spreadex sports,sport,
 TheSunVegas-UK-Casino,thesunvegas,casino,
 TheSunVegas-Casino-GB,thesunvegas,casino,
+TheSunVegas-UK-Casino,sun vegas slots,casino,uk1_google
+TheSunVegas-Casino-GB,sun vegas slots,casino,uk1_google
 Unibet-UK-Casino,unibet,casino,
 Unibet-Casino-GB,unibet,casino,
 Mecca-Bingo-GB,mecca,bingo,
 meccabingo,mecca,bingo,
 WinkBingo-Bingo-GB,winkbingo,bingo,
+DragonBet UK SportBetting,dragonbet,sport,
+DragonBet UK Casino,dragonbet,casino,
+BetMGM-Sportsbetting-GB,bet mgm,sport,
+BetMGM-Casino-GB,betmgm (1),casino,uk1_google
 Choice Home Warranty-Home Warranty-US,choice hw,hw,
 Choice Home Warranty-Home Warranty-US,choice,hw,hw_bing
 Select Home Warranty-Home Warranty-US,select hw,hw,
